@@ -158,10 +158,10 @@ index e57cbd8..cc0c2cf 100644
  func (c *ControlPlane) dnsUpstreamReadyCallback(dnsUpstream *dns.Upstream) (err error) {
 diff --git a/control/dns_async.go b/control/dns_async.go
 new file mode 100644
-index 0000000..e4ffd1b
+index 0000000..8d27376
 --- /dev/null
 +++ b/control/dns_async.go
-@@ -0,0 +1,186 @@
+@@ -0,0 +1,180 @@
 +package control
 +
 +import (
@@ -179,7 +179,6 @@ index 0000000..e4ffd1b
 +	data       []byte
 +	response   chan *dnsmessage.Msg
 +	err        chan error
-+	ctx        context.Context
 +	created    time.Time
 +}
 +
@@ -190,7 +189,6 @@ index 0000000..e4ffd1b
 +	workerPool    sync.WaitGroup
 +	ctx           context.Context
 +	cancel        context.CancelFunc
-+	inFlight      sync.Map // key -> []*AsyncDNSRequest (pending requests for same key)
 +}
 +
 +// NewAsyncDNSProcessor 创建异步DNS处理器
@@ -220,7 +218,6 @@ index 0000000..e4ffd1b
 +		data:     data,
 +		response: make(chan *dnsmessage.Msg, 1),
 +		err:      make(chan error, 1),
-+		ctx:      context.Background(),
 +		created:  time.Now(),
 +	}
 +	
@@ -617,10 +614,10 @@ index 5fd972a..cb87016 100644
  
 diff --git a/control/udp_health_monitor.go b/control/udp_health_monitor.go
 new file mode 100644
-index 0000000..667e863
+index 0000000..dd8a0d9
 --- /dev/null
 +++ b/control/udp_health_monitor.go
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,123 @@
 +/*
 + * SPDX-License-Identifier: AGPL-3.0-only
 + * Copyright (c) 2022-2025, daeuniverse Organization <dae@v2raya.org>
@@ -745,60 +742,12 @@ index 0000000..667e863
 +	atomic.AddInt64(&m.timeoutOccurrences, 1)
 +}
 +
-+// IsHealthy returns true if the system is in a healthy state
-+func (m *UdpHealthMonitor) IsHealthy() bool {
-+	activeConns := atomic.LoadInt64(&m.activeConnections)
-+	timeouts := atomic.LoadInt64(&m.timeoutOccurrences)
-+	totalPackets := atomic.LoadInt64(&m.totalPacketsHandled)
-+	
-+	// 基本健康检查
-+	if activeConns > m.maxActiveConns*9/10 { // 90% 容量
-+		return false
-+	}
-+	
-+	// 超时率检查
-+	if totalPackets > 1000 {
-+		timeoutRate := float64(timeouts) / float64(totalPackets)
-+		if timeoutRate > 0.05 { // 5% 超时率阈值
-+			return false
-+		}
-+	}
-+	
-+	return true
-+}
-+
-+// Shutdown shuts down the health monitor
-+func (m *UdpHealthMonitor) Shutdown() {
-+	atomic.StoreInt32(&m.isShuttingDown, 1)
-+	m.cancel()
-+}
-+
-+// GetStats returns current statistics
-+func (m *UdpHealthMonitor) GetStats() map[string]int64 {
-+	return map[string]int64{
-+		"active_connections":    atomic.LoadInt64(&m.activeConnections),
-+		"total_packets_handled": atomic.LoadInt64(&m.totalPacketsHandled),
-+		"dropped_packets":       atomic.LoadInt64(&m.droppedPackets),
-+		"timeout_occurrences":   atomic.LoadInt64(&m.timeoutOccurrences),
-+		"max_active_conns":      m.maxActiveConns,
-+	}
-+}
-+
 +// Global UDP health monitor instance
 +var DefaultUdpHealthMonitor = NewUdpHealthMonitor()
 diff --git a/control/udp_task_pool.go b/control/udp_task_pool.go
 index 08b02d7..89fd42a 100644
 --- a/control/udp_task_pool.go
 +++ b/control/udp_task_pool.go
-@@ -1,7 +1,7 @@
- /*
- *  SPDX-License-Identifier: AGPL-3.0-only
- *  Copyright (c) 2022-2025, daeuniverse Organization <dae@v2raya.org>
--*/
-+ */
- 
- package control
- 
 @@ -11,7 +11,11 @@ import (
  	"time"
  )
@@ -1036,4 +985,3 @@ index 08b02d7..89fd42a 100644
 +		p.queueChPool.Put(ch)
  	}
  }
- 
